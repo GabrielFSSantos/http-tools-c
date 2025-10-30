@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Drive Comunitário — Servidor C</title>
+  <style>
+    :root{--bg:#0f141a;--panel:#151b22;--muted:#9bb0c3;--text:#e7eef6;--brand:#4da3ff;--card:#19212a;--card-hover:#1f2a36;--border:#223042}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:500 15px/1.45 system-ui,-apple-system,Segoe UI,Roboto}
+    a{color:inherit;text-decoration:none}
+    header{position:sticky;top:0;z-index:10;background:linear-gradient(180deg,var(--panel),rgba(21,27,34,.9));border-bottom:1px solid var(--border);backdrop-filter:saturate(140%) blur(6px)}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 20px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .logo{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px}
+    .logo svg{width:24px;height:24px}
+    .search{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;min-width:260px}
+    .search input{background:transparent;border:0;outline:0;color:var(--text);width:220px;font:inherit}
+    main .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));padding:18px 20px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;transition:.15s ease;display:flex;gap:12px;align-items:flex-start;min-height:86px}
+    .card:hover{background:var(--card-hover);border-color:#2a3a4f;transform:translateY(-2px)}
+    .icon{width:34px;height:34px;flex:0 0 34px;border-radius:10px;display:grid;place-items:center}
+    .icon.file{background:rgba(77,163,255,.15);border:1px solid rgba(77,163,255,.25)}
+    .meta{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .muted{color:var(--muted);font-size:.92em}
+    .empty{padding:28px 20px;color:var(--muted)}
+    @media (max-width:520px){.search{min-width:0;width:100%}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="row">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 7h6l2 2h8v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.6"/>
+          </svg>
+          Drive Comunitário
+        </div>
+        <label class="search" title="Filtrar itens">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M21 21l-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="1.6" />
+          </svg>
+          <input id="q" placeholder="Buscar arquivos…" autocomplete="off" />
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" hidden>Nenhum arquivo corresponde ao filtro.</div>
+  </main>
+
+  <script>
+    // === Liste aqui os seus arquivos (que estão em ./pages) ===
+    const FILES = [
+      "arquivo.txt",
+      // "relatorio.pdf",
+      // "imagem.png",
+      // "apresentacao.html"
+    ];
+    // ==========================================================
+
+    const grid = document.getElementById('grid');
+    const empty = document.getElementById('empty');
+    const q = document.getElementById('q');
+
+    function iconFor(name){
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      const label = ({
+        pdf:'PDF', png:'PNG', jpg:'JPG', jpeg:'JPG', gif:'GIF', svg:'SVG',
+        txt:'TXT', json:'JSON', html:'HTML', htm:'HTML', css:'CSS', js:'JS'
+      })[ext] || ext.toUpperCase() || 'FILE';
+      return `<div class="icon file" aria-hidden="true" title="${label}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM14 2v6h6"/>
+        </svg>
+      </div>`;
+    }
+
+    function render(list){
+      grid.innerHTML = '';
+      for (const file of list){
+        const card = document.createElement('a');
+        card.className = 'card';
+        card.href = '/' + encodeURIComponent(file);
+        card.innerHTML = `
+          ${iconFor(file)}
+          <div class="meta">
+            <div class="name">${file}</div>
+            <div class="muted">Arquivo</div>
+          </div>`;
+        grid.appendChild(card);
+      }
+      empty.hidden = list.length !== 0;
+    }
+
+    function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+    function applyFilter(){
+      const term = norm(q.value.trim());
+      const filtered = FILES.filter(n => !term || norm(n).includes(term));
+      render(filtered);
+    }
+
+    render(FILES);
+    q.addEventListener('input', applyFilter);
+  </script>
+</body>
+</html>
