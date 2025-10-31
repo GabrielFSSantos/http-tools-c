@@ -13,12 +13,43 @@
 #include <stdio.h>          
 #include <stdlib.h>         
 #include <string.h>         
+#include <strings.h>        
 #include <sys/socket.h>     
 #include <sys/stat.h>       
 #include <unistd.h>         
 
 // -----------------------------------------------------------------------------
-// Listagem HTML.
+// Helpers
+// -----------------------------------------------------------------------------
+
+// Acrescenta texto em um buffer crescendo com realloc (retorna false em OOM).
+static bool buf_append(char **pbuf, size_t *cap, size_t *len, const char *src) {
+    size_t need = strlen(src);
+    if (*len + need + 1 > *cap) {
+        size_t novo = (*cap ? *cap * 2 : 4096);
+        while (novo < *len + need + 1) novo *= 2;
+        char *tmp = (char *)realloc(*pbuf, novo);
+        if (!tmp) return false;
+        *pbuf = tmp; *cap = novo;
+    }
+    memcpy(*pbuf + *len, src, need + 1);
+    *len += need;
+    return true;
+}
+
+// JSON-escape simples para nomes (aspas e barra invertida).
+static void json_escape_into(char *dst, const char *src) {
+    // Assume que dst tem espaço suficiente (chamaremos com sobra).
+    while (*src) {
+        unsigned char c = (unsigned char)*src++;
+        if (c == '\\' || c == '\"') { *dst++ = '\\'; *dst++ = (char)c; }
+        else { *dst++ = (char)c; }
+    }
+    *dst = '\0';
+}
+
+// -----------------------------------------------------------------------------
+// Listagem HTML (fallback quando não existe index.html).
 // -----------------------------------------------------------------------------
 static void send_dir_listing(int fd, const char *url_path, const char *fs_dir) {
     DIR *d = opendir(fs_dir);
@@ -35,7 +66,9 @@ static void send_dir_listing(int fd, const char *url_path, const char *fs_dir) {
 
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
+        // oculta ".", ".." e "index.html"
         if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) continue;
+        if (!strcasecmp(ent->d_name, "index.html")) continue;
 
         char item[PATH_MAX];
         snprintf(item, sizeof(item), "%s/%s",
@@ -159,9 +192,10 @@ void fs_serve_path(int fd, const char *url_path, const char *fs_path) {
         snprintf(idx, sizeof(idx), "%s/index.html", fs_path);
 
         if (stat(idx, &st) == 0 && S_ISREG(st.st_mode)) {
+            // Diretório com index.html → serve o index (frontend buscará /?list=1)
             send_file(fd, idx);
         } else {
-            // remove "/" final só para apresentação
+            // Sem index.html → listagem HTML simples (ocultando index.html por coerência)
             char u[PATH_MAX];
             snprintf(u, sizeof(u), "%s", url_path);
             size_t ul = strlen(u);
@@ -173,4 +207,45 @@ void fs_serve_path(int fd, const char *url_path, const char *fs_path) {
     } else {
         util_send_404(fd);
     }
+}
+
+// -----------------------------------------------------------------------------
+// NOVO: envia JSON com os itens do diretório (exceto "index.html" e ocultos).
+// Use no http.c quando a query string indicar listagem (ex.: "?list=1").
+// -----------------------------------------------------------------------------
+void fs_send_dir_json(int fd, const char *fs_dir) {
+    DIR *d = opendir(fs_dir);
+    if (!d) { util_send_404(fd); return; }
+
+    // Monta JSON em memória.
+    size_t cap = 0, len = 0;
+    char *json = NULL;
+    (void)buf_append(&json, &cap, &len, "[");
+
+    struct dirent *ent;
+    bool first = true;
+    while ((ent = readdir(d)) != NULL) {
+        const char *name = ent->d_name;
+
+        // Oculta ".", "..", "index.html" e itens que começam com "."
+        if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
+        if (!strcasecmp(name, "index.html")) continue;
+        if (name[0] == '.') continue;
+
+        // Escapa para JSON
+        char esc[PATH_MAX * 2]; // espaço suficiente para aspas escapadas
+        json_escape_into(esc, name);
+
+        char tmp[PATH_MAX * 2 + 8];
+        snprintf(tmp, sizeof tmp, "%s\"%s\"", first ? "" : ",", esc);
+        first = false;
+        if (!buf_append(&json, &cap, &len, tmp)) { free(json); closedir(d); return; }
+    }
+    closedir(d);
+
+    if (!buf_append(&json, &cap, &len, "]")) { free(json); return; }
+
+    util_send_headers(fd, "200 OK", "application/json; charset=utf-8", (long)len);
+    (void)send(fd, json, len, 0);
+    free(json);
 }

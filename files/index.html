@@ -53,14 +53,15 @@
   </main>
 
   <script>
-    // === Liste aqui os seus arquivos (que estão em ./pages) ===
-    const FILES = [
-      "arquivo.txt",
-      // "relatorio.pdf",
-      // "imagem.png",
-      // "apresentacao.html"
+    // =====================================================================
+    // MODO AUTOMÁTICO: busca a lista em "/?list=1" (JSON) e renderiza.
+    // Fallback: se não existir esse endpoint, usa o array FILES manual.
+    // =====================================================================
+
+    // Fallback manual (caso o servidor ainda não forneça /?list=1)
+    const FILES_FALLBACK = [
+      // "arquivo.txt", "relatorio.pdf", ...
     ];
-    // ==========================================================
 
     const grid = document.getElementById('grid');
     const empty = document.getElementById('empty');
@@ -88,7 +89,7 @@
         card.innerHTML = `
           ${iconFor(file)}
           <div class="meta">
-            <div class="name">${file}</div>
+            <div class="name" title="${file}">${file}</div>
             <div class="muted">Arquivo</div>
           </div>`;
         grid.appendChild(card);
@@ -96,15 +97,31 @@
       empty.hidden = list.length !== 0;
     }
 
-    function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
-    function applyFilter(){
+    function norm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+    function applyFilter(files){
       const term = norm(q.value.trim());
-      const filtered = FILES.filter(n => !term || norm(n).includes(term));
+      const filtered = files.filter(n => !term || norm(n).includes(term));
       render(filtered);
     }
 
-    render(FILES);
-    q.addEventListener('input', applyFilter);
+    async function loadAndRender(){
+      let files = [];
+      try {
+        // tenta JSON: ["arquivo.txt","foto.png",...]
+        const res = await fetch('/?list=1', {headers:{'Accept':'application/json'}});
+        if (res.ok) files = await res.json();
+      } catch (_) { /* ignora e usa fallback */ }
+
+      if (!Array.isArray(files) || !files.length) files = FILES_FALLBACK.slice();
+
+      // remove "index.html" (qualquer caixa), e ignora itens ocultos (começam com ".")
+      files = files.filter(n => n && !/^\./.test(n) && n.toLowerCase() !== 'index.html');
+
+      render(files);
+      q.addEventListener('input', () => applyFilter(files));
+    }
+
+    loadAndRender();
   </script>
 </body>
 </html>

@@ -1,24 +1,30 @@
 # http-tools-c
 
-Implementação **didática** de um servidor HTTP/1.1 mínimo em C (apenas **GET**) e um **cliente** HTTP simples para download. O objetivo é entender melhor redes + HTTP na prática.
+Implementação de um servidor HTTP/1.1 em C (apenas **GET**) e um **cliente** HTTP simples para listagem e download. O foco é entender redes + HTTP na prática, com código direto, comentado e sem dependências externas.
 
-> **Stack**: C99 (gcc), sockets Berkeley, POSIX; sem dependências externas.
+> **Stack:** C99 (gcc), sockets Berkeley, POSIX; sem libs de terceiros.
 
 ## ✨ Funcionalidades
 
-* Servidor HTTP:
+**Servidor HTTP**
 
-  * Responde **GET** a arquivos e diretórios dentro de uma **raiz** (document root).
-  * Determina **Content-Type** pelo sufixo de arquivo (html, css, js, png, jpg, svg, pdf, txt…).
-  * Lista diretórios com uma **página de índice simples** quando não há `index.html`.
-  * Encaminha `index.html` quando a URL aponta para um diretório.
-  * Respostas básicas: `200 OK`, `404 Not Found`, `400 Bad Request` (erro de parsing) e `405 Method Not Allowed` (para métodos ≠ GET).
-* Cliente HTTP:
+* Atende **GET** a arquivos e diretórios dentro da **raiz** (document root).
+* Determina **Content-Type** por extensão (html, css, js, png, jpg, svg, pdf, txt…).
+* **Diretórios:**
 
-  * Faz **GET** de uma URL `http://host[:porta]/caminho` e salva em `./downloads/<arquivo>`.
-  * Entende `Content-Length` e **Transfer-Encoding: chunked** (decodificação de corpo por chunks). ([IETF Datatracker][2])
+  * Se existir `index.html`, ele é **servido**.
+  * Se **não** existir `index.html`, o servidor gera **listagem HTML**.
+  * API de listagem: `/?list=1` retorna **JSON** com os nomes dos arquivos do diretório **excluindo** `index.html`.
+* Respostas: `200 OK`, `404 Not Found`, `400 Bad Request` (parsing inválido) e `405 Method Not Allowed` (método ≠ GET).
+* Higiene de caminho: normaliza URL, **recusa `..`** e ancora sob a raiz resolvida.
 
-> A estrutura de diretórios do repositório (padrão) já traz `server.c`, `client.c`, `server_files/`, `files/` e `downloads/`. ([GitHub][1])
+**Cliente HTTP**
+
+* Baixa um único recurso: `./client http://host[:porta]/caminho` → salva em `./downloads/<arquivo>`.
+* Lista itens de um diretório: `./client --list http://host:porta/dir/` (usa `/?list=1`).
+* Baixa todos os itens listados: `./client --all http://host:porta/dir/` (usa `/?list=1`).
+* Suporta corpo com **`Content-Length`** e **`Transfer-Encoding: chunked`** (decodificação implementada). ([RFC Editor][1])
+* **URLs com espaços/acentos:** o cliente faz *URL-encoding por segmento de path* automaticamente (conforme “unreserved” da RFC 3986). ([MDN Web Docs][2])
 
 ---
 
@@ -26,24 +32,34 @@ Implementação **didática** de um servidor HTTP/1.1 mínimo em C (apenas **GET
 
 ```
 .
-├─ server.c                 # main do servidor (argumentos, chamada http_run)
-├─ client.c                 # cliente HTTP (GET e grava em ./downloads)
+├─ server.c                          # main do servidor (args e http_run)
+├─ client.c                          # main do cliente (roteia modos SINGLE/LIST/ALL)
+│
 ├─ server_files/
-│  ├─ http.c  http.h        # socket, bind/listen/accept, parsing da 1ª linha e roteamento
-│  ├─ fs.c    fs.h          # junção segura raiz + URL, envio de arquivo e listagem de diretório
-│  └─ util.c  util.h        # MIME types, URL decode, cabeçalhos e respostas 400/404/405
-├─ files/                   # “document root” padrão do servidor (você coloca seus arquivos aqui)
-├─ downloads/               # saída padrão de downloads do cliente
-├─ Makefile                 # alvos: server (padrão), client, run, clean
+│  ├─ http.c  http.h                 # socket, bind/listen/accept, parsing da 1ª linha, roteamento
+│  ├─ fs.c    fs.h                   # join seguro raiz+URL, envio de arquivo e listagem/JSON (?list=1)
+│  └─ util.c  util.h                 # MIME types, URL-decode, cabeçalhos e respostas 400/404/405
+│
+├─ client_files/
+│  ├─ net.c     net.h                # getaddrinfo/socket/connect (IPv4/IPv6)
+│  ├─ httpc.c   httpc.h              # HTTP GET (status/headers/chunked/mem vs arquivo)
+│  ├─ url.c     url.h                # parse de URL, URL-encode por segmentos, utilidades
+│  └─ io.c      io.h                 # helpers de I/O (linhas, trims) e pasta de downloads
+│
+├─ files/                            # “document root” padrão do servidor (coloque seus arquivos aqui)
+├─ downloads/                        # saída padrão de downloads do cliente
+├─ Makefile                          # alvos: server (padrão), client, run, clean
 └─ README.md
 ```
+
+> O cliente continua disponível como **binário único**, mas o código está dividido em `client_files/` para ficar mais didático.
 
 ---
 
 ## ✅ Pré-requisitos
 
-* Linux/WSL, `gcc` e `make` instalados.
-* Porta disponível (padrão **5050**).
+* Linux/WSL com `gcc` e `make`.
+* Porta livre (padrão **5050**).
 
 ---
 
@@ -61,81 +77,84 @@ make client
 
 ## ▶️ Executar o servidor
 
-Coloque os arquivos que deseja servir em `./files` (ou informe outra raiz).
+Coloque o que deseja servir em `./files` (ou passe outra raiz).
 
 ```bash
-# cria um exemplo mínimo
 mkdir -p ./files
 echo "olá" > ./files/arquivo.txt
-```
 
-Suba o servidor (padrão: raiz `./files`, porta `5050`):
-
-```bash
+# raiz padrão ./files, porta 5050
 ./server
-# ou escolhendo raiz e porta:
+
+# ou escolhendo raiz e porta explicitamente
 ./server ./files 5050
 ```
 
-Abra no navegador:
-`http://localhost:5050/`
+Acesse no navegador: `http://localhost:5050/`
 
 ---
 
-## ⬇️ Usar o cliente (downloader)
+## ⬇️ Usar o cliente
 
-Baixa o recurso e salva em `./downloads/<nome>`:
+### 1) Baixar um único recurso
 
 ```bash
-# baixe a página inicial do seu server
+# página inicial (salva como downloads/index.html)
 ./client http://localhost:5050/
 
-# baixe um arquivo específico
+# arquivo específico
 ./client http://localhost:5050/arquivo.txt
-
-# ver o que foi salvo
-ls -lh downloads/
 ```
 
-O cliente suporta corpo com `Content-Length` e **transferência “chunked”**; a detecção é feita pelos cabeçalhos HTTP da resposta. ([MDN Web Docs][3])
-
----
-
-## 🛠️ Alvos úteis do Makefile
+**URLs com espaço/acentos** – basta passar “do seu jeito”:
+O cliente codifica cada **segmento do path** automaticamente:
 
 ```bash
-make           # compila o servidor (binário: ./server)
-make client    # compila o cliente  (binário: ./client)
-make clean     # remove binários e objetos
+# nomes com espaço:
+./client "http://localhost:5050/Captura de tela 2025-03-16 114244.png"
+
+# nomes com acentos:
+./client "http://localhost:5050/relatório final.pdf"
+```
+
+### 2) Listar itens de um diretório
+
+```bash
+./client --list http://localhost:5050/
+# saída: nomes de arquivos, sem o index.html
+```
+
+### 3) Baixar todos os itens listados
+
+```bash
+./client --all  http://localhost:5050/
+# baixa todos os arquivos retornados por /?list=1 para ./downloads/
+```
+
+Verifique o resultado:
+
+```bash
+ls -lh downloads/
 ```
 
 ---
 
 ## 🔒 Notas de segurança
 
-* O servidor **limpa e normaliza** o caminho da URL e **recusa “..”**, juntando com a raiz resolvida por `realpath` para evitar “escape” do diretório publicado (Directory Traversal).
-* Apenas método **GET** é aceito; qualquer outro recebe `405 Method Not Allowed`.
-* Não há TLS/HTTPS, autenticação, compressão, cache, HTTP/2 etc.
-
-Para a sintaxe/mensagens do HTTP/1.1, consulte as RFCs (abaixo). ([IETF Datatracker][4])
+* O servidor **limpa/normaliza** o caminho e **recusa `..`** (Directory Traversal), juntando com a raiz obtida por `realpath`.
+* Apenas **GET** é aceito; outros métodos recebem `405`.
+* Sem TLS/HTTPS, auth, compactação, cache, HTTP/2 etc.
 
 ---
 
 ## 📚 Referências
 
-* **HTTP/1.1 – Message Syntax and Routing** (RFC 7230). Base canônica para a gramática de mensagens HTTP/1.1. ([IETF Datatracker][4])
-* **HTTP/1.1 – Semantics and Content** (RFC 7231). Métodos, códigos de status e cabeçalhos semânticos. ([IETF Datatracker][5])
-* **HTTP/1.1 – Chunked Transfer Coding** (seção 7.1 da RFC 9112) e guia da MDN para `Transfer-Encoding`. Úteis para o cliente que decodifica **chunked**. ([IETF Datatracker][2])
-* **Repositório**: *http-tools-c* (estrutura e código). ([GitHub][1])
+* **HTTP/1.1 (mensagens e transporte)** — RFC 9112 (atualiza 7230/7231/7232/7233/7234): gramática das mensagens, *chunked*, etc.
+* **HTTP Semantics** — RFC 9110: métodos, códigos de status e semântica geral.
+* **Transfer-Encoding / chunked** — documentação MDN (conceitos e comportamento). ([RFC Editor][1])
+* **URI – *unreserved characters*** (URL-encoding seguro por segmento) — RFC 3986. ([MDN Web Docs][2])
 
 ---
 
-## 📜 Licença
-
-Uso acadêmico/didático. (Adapte aqui a licença que preferir: MIT, BSD, etc.)
-
-[1]: https://github.com/GabrielFSSantos/http-tools-c "GitHub - GabrielFSSantos/http-tools-c: Implementação didática do protocolo HTTP em C"
-[2]: https://datatracker.ietf.org/doc/html/rfc9112?utm_source=chatgpt.com "RFC 9112 - HTTP/1.1"
-[3]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Transfer-Encoding?utm_source=chatgpt.com "Transfer-Encoding header - HTTP - MDN Web Docs"
-[4]: https://datatracker.ietf.org/doc/html/rfc7230?utm_source=chatgpt.com "RFC 7230 - Hypertext Transfer Protocol (HTTP/1.1)"
-[5]: https://datatracker.ietf.org/doc/html/rfc7231?utm_source=chatgpt.com "RFC 7231 - Hypertext Transfer Protocol (HTTP/1.1)"
+[1]: https://www.rfc-editor.org/rfc/rfc4395.txt?utm_source=chatgpt.com "RFC 4395"
+[2]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Trailer?utm_source=chatgpt.com "Trailer header - HTTP - MDN Web Docs"

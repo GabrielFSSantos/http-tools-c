@@ -1,5 +1,5 @@
 // Camada de rede: abre socket, aceita conexões e trata cada cliente.
-// HTTP mínimo: aceita apenas GET e delega o mapeamento/retorno para fs.c.
+// HTTP: aceita GET e delega o mapeamento/retorno para fs.c.
 
 #include "http.h"
 #include "fs.h"
@@ -11,12 +11,13 @@
 #include <string.h>      
 #include <sys/socket.h>  
 #include <sys/types.h>
+#include <sys/stat.h>    
 #include <unistd.h>      
 #include <limits.h>      
 #include <stdlib.h>      
 
-#define BACKLOG 16        
-#define RECV_BUF 4096     
+#define BACKLOG 16        // fila de conexões pendentes
+#define RECV_BUF 4096     // buffer para ler a primeira linha do request
 
 // Trata um cliente: lê a primeira linha, valida método e chama a camada de FS.
 static void handle_client(int cfd, const char *root_real) {
@@ -42,9 +43,18 @@ static void handle_client(int cfd, const char *root_real) {
         return;
     }
 
-    // Remove query string (tudo após '?') e decodifica %XX
+    // ---- Query string -----------------------------------------------------
+    // Mantemos a query para detectar "?list=1" (usada pelo index.html).
+    // Depois de checar, removemos a query da URL para mapear o caminho.
+    int want_list = 0;
     char *q = strchr(url, '?');
-    if (q) *q = '\0';
+    if (q) {
+        // procura "list=1" simples (não fazemos parse completo, didático)
+        if (strstr(q + 1, "list=1") != NULL) want_list = 1;
+        *q = '\0'; // remove query para resolver o caminho físico
+    }
+
+    // Decodifica %XX
     util_url_decode(url);
 
     // Constrói o caminho de arquivo de forma segura (sem permitir "..")
@@ -55,7 +65,19 @@ static void handle_client(int cfd, const char *root_real) {
         return;
     }
 
-    // Responde: arquivo (com MIME) ou listagem de diretório; 404 se não existir
+    // Se pediram "?list=1", e o alvo é um diretório, responde JSON com a lista
+    if (want_list) {
+        struct stat st;
+        if (stat(fs_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            fs_send_dir_json(cfd, fs_path);  // lista sem "index.html" e sem ocultos
+        } else {
+            util_send_404(cfd);
+        }
+        close(cfd);
+        return;
+    }
+
+    // Responde: arquivo (com MIME) ou diretório (index.html / listagem HTML)
     fs_serve_path(cfd, url, fs_path);
 
     // Encerra a conexão (Connection: close)
@@ -86,7 +108,7 @@ int http_run(const char *root, int port) {
         perror("listen"); close(sfd); return 1;
     }
 
-    // 4) Resolve a raiz do site para caminho absoluto (ex.: "./pages" -> "/home/.../pages")
+    // 4) Resolve a raiz do site para caminho absoluto (ex.: "./files" -> "/abs/.../files")
     char root_real[PATH_MAX];
     if (!realpath(root, root_real)) {
         perror("realpath"); close(sfd); return 1;
